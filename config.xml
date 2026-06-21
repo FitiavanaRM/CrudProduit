@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<database>
+    <host>localhost</host>
+    <port>3306</port>
+    <!-- Nom de la base de données -->
+    <name>gestion_produits</name>
+    <!-- Identifiants de connexion -->
+    <username>root</username>
+    <password>tonMotDePasse</password>
+</database>

@@ -14,6 +14,10 @@ public class Product {
 
     public Product(int id, String nom, double prix, int quantite, boolean disponible) {
         setId(id);
+        setNom(nom);
+        setPrix(prix);
+        setQuantite(quantite);
+        setDisponible(disponible);
     }
 
     public int getId() {

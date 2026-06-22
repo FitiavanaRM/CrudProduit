@@ -56,8 +56,8 @@ public class DashboardController {
     // Statistiques
     @FXML private HBox statRow;
     @FXML private Label statTotal;
-    @FXML private Label statMaries;
-    @FXML private Label statCelibataires;
+    @FXML private Label statDispo;
+    @FXML private Label statNonDispo;
 
     // Tableau
     @FXML private Label tableCount;
@@ -65,8 +65,8 @@ public class DashboardController {
     @FXML private Label refreshIcon;
     @FXML private TableView<Product> table;
     @FXML private TableColumn<Product, String> colNom;
-    @FXML private TableColumn<Product, String> colprix;
-    @FXML private TableColumn<Product, String> colquantite;
+    @FXML private TableColumn<Product, Double> colprix;
+    @FXML private TableColumn<Product, Integer> colquantite;
     @FXML private TableColumn<Product, Boolean> colStatut;
     @FXML private TableColumn<Product, Product> colActions;
 
@@ -88,7 +88,6 @@ public class DashboardController {
     private ToggleSwitch DispoSwitch;
     private RotateTransition refreshSpin;
     private Product editing;
-    private Product current;
 
     private int lastTotal = 0;
     private int lastDispo = 0;
@@ -111,7 +110,6 @@ public class DashboardController {
     }
 
     public void setCurrentUser(Product p) {
-        this.current = p;
         avatarLabel.setText(initials(p));
         welcomeLabel.setText("Bonjour — gérez vos produits");
     }
@@ -126,28 +124,25 @@ public class DashboardController {
 
     private void setupColumns() {
         colNom.setCellValueFactory(c -> c.getValue().nomProperty());
-        colprix.setCellValueFactory(c -> c.getValue().prenomProperty());
-        colquantite.setCellValueFactory(c -> c.getValue().emailProperty());
+        colprix.setCellValueFactory(c -> c.getValue().prixProperty().asObject());
+        colquantite.setCellValueFactory(c -> c.getValue().quantiteProperty().asObject());
 
         colNom.setPrefWidth(130);
         colprix.setPrefWidth(130);
-        colquantite.setPrefWidth(240);
+        colquantite.setPrefWidth(130);
         colStatut.setPrefWidth(140);
-        colActions.setPrefWidth(110);
-        colActions.setMinWidth(100);
+        colActions.setMinWidth(110);
 
-        colStatut.setCellValueFactory(c -> c.getValue().DispoProperty());
+        colStatut.setCellValueFactory(c -> c.getValue().disponibleProperty().asObject());
         colStatut.setCellFactory(col -> new TableCell<>() {
             @Override
             protected void updateItem(Boolean dispo, boolean empty) {
                 super.updateItem(dispo, empty);
                 if (empty || dispo == null) {
-                    setGraphic(null);
-                    return;
+                    setGraphic(null); return;
                 }
                 Label chip = new Label(dispo ? "Disponible" : "N'est pas disponible");
-                chip.getStyleClass().add("chip");
-                chip.getStyleClass().add(dispo ? "chip--dispo" : "chip--non_dispo");
+                chip.getStyleClass().addAll("chip", dispo ? "chip--dispo" : "chip--non_dispo");
                 setGraphic(chip);
             }
         });
@@ -158,13 +153,12 @@ public class DashboardController {
             private final Button edit = iconButton("✎", "icon-btn");
             private final Button del = iconButton("🗑", "icon-btn", "icon-btn--danger");
             private final HBox box = new HBox(8, edit, del);
-
             {
                 box.setAlignment(Pos.CENTER);
                 edit.setOnAction(e -> {
                     Product p = rowProduct();
                     if (p != null) {
-                        table.getSelectionModel().select(u);
+                        table.getSelectionModel().select(p);
                     }
                 });
                 del.setOnAction(e -> {
@@ -241,21 +235,21 @@ public class DashboardController {
     // ---------- données ----------
 
     private void loadData() {
-        List<Product> products = dao.findAll();
-        master.setAll(products);
+        try {
+            List<Product> products = dao.findAll();
+            master.setAll(products);
+            int total = products.size();
+            int dispo = (int) products.stream().filter(Product::isDisponible).count();
+            int nonDispo = total - dispo;
 
-        int total = products.size();
-        int dispo = (int) products.stream().filter(Product::isDisponible).count();
-        int nonDispo = total - dispo;
-
-        Animations.countUp(statTotal, lastTotal, total, 700);
-        Animations.countUp(statMaries, lastDispo, dispo, 700);
-        Animations.countUp(statCelibataires, lastNonDispo, nonDispo, 700);
-        lastTotal = total;
-        lastDispo = dispo;
-        lastNonDispo = nonDispo;
-
-        tableCount.setText(total + (" produits"));
+            Animations.countUp(statTotal, lastTotal, total,700);
+            Animations.countUp(statDispo, lastDispo,dispo,    700);
+            Animations.countUp(statNonDispo,lastNonDispo, nonDispo, 700);
+            lastTotal = total; lastDispo = dispo; lastNonDispo = nonDispo;
+            tableCount.setText(total + " produit" + (total > 1 ? "s" : ""));
+        } catch (Exception e) {
+            Toast.error(root, "Erreur chargement : " + e.getMessage());
+        }
     }
 
     // ---------- actions formulaire ----------
@@ -278,34 +272,56 @@ public class DashboardController {
     @FXML
     private void handleSave() {
         String nom = text(nomField);
-        Double prix = Double.valueOf(text(prixField));
-        int quantite = Integer.parseInt(text(quantiteField));
 
-        if (nom.isEmpty() || prix.isNaN()) {
-            reject("nom et prix sont obligatoires.");
+        if (nom.isEmpty()) {
+            Toast.error(root, "Le nom est obligatoire.");
+            Animations.shake(formCard);
+            return;
+        }
+        // Validation
+        double prix;
+        try {
+            prix = Double.parseDouble(text(prixField));
+            if (prix < 0) {
+                throw new NumberFormatException();
+            }
+        } catch (NumberFormatException e) {
+            Toast.error(root, "Prix invalide — entrez un nombre positif (ex: 34.50).");
+            Animations.shake(formCard);
             return;
         }
 
-        int excludeId = editing == null ? 0 : editing.getId();
-
-        if (editing == null) {
-            Product u = new Product(0, nom, prix, quantite, DispoSwitch.isSelected());
-            dao.insert(u);
-            Toast.success(root, "Produits « " + u.fullName() + " » ajouté avec succès");
-        } else {
-            editing.setNom(nom);
-            editing.setPrix(prix);
-            editing.setQuantite(quantite);
-            editing.setDisponible(DispoSwitch.isSelected());
-
-            dao.update(editing);
-            Toast.success(root, "Modifications enregistrées");
+        int quantite;
+        try {
+            quantite = Integer.parseInt(text(quantiteField));
+            if (quantite < 0) {
+                throw new NumberFormatException();
+            }
+        } catch (NumberFormatException e) {
+            Toast.error(root, "Quantité invalide — entrez un entier positif.");
+            Animations.shake(formCard);
+            return;
         }
-
-        loadData();
-        table.getSelectionModel().clearSelection();
-        clearForm();
-        Animations.pulse(statTotal);
+        try {
+            if (editing == null) {
+                Product u = new Product(0, nom, prix, quantite, DispoSwitch.isSelected());
+                dao.insert(u);
+                Toast.success(root, "Produit « " + u.fullName() + " » ajouté !");
+            } else {
+                editing.setNom(nom);
+                editing.setPrix(prix);
+                editing.setQuantite(quantite);
+                editing.setDisponible(DispoSwitch.isSelected());
+                dao.update(editing);
+                Toast.success(root, "Modifications enregistrées");
+            }
+            loadData();
+            table.getSelectionModel().clearSelection();
+            clearForm();
+            Animations.pulse(statTotal);
+        } catch (Exception e) {
+            Toast.error(root, "Erreur base de données : " + e.getMessage());
+        }
     }
 
     @FXML
@@ -323,22 +339,25 @@ public class DashboardController {
         alert.setContentText("Cette action est définitive.");
         Optional<ButtonType> result = alert.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            dao.delete(u.getId());
-            Toast.info(root, "Produit supprimé");
-            loadData();
-            table.getSelectionModel().clearSelection();
-            clearForm();
+            try {
+                dao.delete(u.getId());
+                Toast.info(root, "Produit supprimé");
+                loadData();
+                table.getSelectionModel().clearSelection();
+                clearForm();
+            } catch (Exception e) {
+                Toast.error(root, "Erreur suppression : " + e.getMessage());
+            }
         }
     }
 
-    private void editProduct(@org.jetbrains.annotations.UnknownNullability Product u) {
+    private void editProduct(Product u) {
         editing = u;
         formTitle.setText("Modifier le produit");
-        formHint.setText("Laissez le mot de passe vide pour le conserver.");
+        formHint.setText("Modifier les champs puis enregistrez.");
         nomField.setText(u.getNom());
         prixField.setText(String.valueOf(u.getPrix()));
         quantiteField.setText(String.valueOf(u.getQuantite()));
-        passwordField.clear();
         DispoSwitch.setSelected(u.isDisponible());
         saveBtn.setText("Enregistrer les modifications");
         showDelete(true);
@@ -449,12 +468,12 @@ public class DashboardController {
         return field.getText() == null ? "" : field.getText().trim();
     }
 
-    private static String initials(@org.jetbrains.annotations.UnknownNullability Product u) {
-        double p = u.getPrix();
-        String n = u.getNom();
-        String a = p.isEmpty() ? "" : p.substring(0, 1);
-        String b = n.isEmpty() ? "" : n.substring(0, 1);
-        String res = (a + b).toUpperCase();
-        return res.isEmpty() ? "?" : res;
+    private static String initials(Product u) {
+        String nom = u.getNom();
+        if (nom == null || nom.isEmpty()) return "?";
+        String[] parts = nom.trim().split("\\s+");
+        String a = parts[0].substring(0, 1).toUpperCase();
+        String b = parts.length > 1 ? parts[1].substring(0, 1).toUpperCase() : "";
+        return (a + b).isEmpty() ? "?" : (a + b);
     }
 }
